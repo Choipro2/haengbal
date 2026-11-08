@@ -1,0 +1,787 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>우리 반 행발 도우미</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  body { font-family: 'Pretendard', system-ui, sans-serif; background:#f8fafc; }
+  ::-webkit-scrollbar { width:6px; height:6px } ::-webkit-scrollbar-thumb { background:#cbd5e1; border-radius:3px }
+  .chip:active { transform: scale(.96) }
+  tr.active-row { background:#eef2ff !important; box-shadow: inset 4px 0 0 #4f46e5; }
+  .spin { animation: spin 1s linear infinite; display:inline-block } @keyframes spin { to { transform: rotate(360deg) } }
+</style>
+</head>
+<body class="text-slate-800 h-screen flex flex-col overflow-hidden">
+
+<header class="bg-white border-b border-slate-200 px-4 py-3 flex flex-wrap items-center justify-between gap-3 shrink-0 shadow-sm z-20">
+  <div class="flex items-center gap-3">
+    <div class="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white text-xl shadow">✎</div>
+    <div>
+      <h1 class="text-lg font-bold text-slate-900">우리 반 행발 도우미</h1>
+      <p class="text-xs text-slate-500">관찰 키워드 입력 → ChatGPT 버전 A/B 생성 → NEIS 바이트 확인 → 엑셀 저장</p>
+    </div>
+  </div>
+  <div class="flex flex-wrap items-center gap-2 text-xs">
+    <label class="flex items-center gap-1 bg-slate-100 rounded-lg px-2 py-1 border border-slate-200">
+      <span class="font-semibold text-slate-600">학년</span>
+      <select id="gradeSelect" class="bg-white font-bold py-1 px-2 rounded border border-slate-200">
+        <option value="1">1학년</option><option value="2">2학년</option><option value="3">3학년</option>
+        <option value="4" selected>4학년</option><option value="5">5학년</option><option value="6">6학년</option>
+      </select>
+    </label>
+    <button data-open="settingsModal" class="px-3 py-2 rounded-lg font-semibold bg-slate-100 hover:bg-slate-200">⚙ 설정</button>
+    <button data-open="rosterModal" class="px-3 py-2 rounded-lg font-semibold bg-slate-100 hover:bg-slate-200">👥 번호 관리</button>
+    <span class="w-px h-5 bg-slate-200"></span>
+    <button id="batchBtn" class="px-3.5 py-2 rounded-lg font-bold bg-indigo-600 hover:bg-indigo-700 text-white">✨ 일괄 생성</button>
+    <button id="exportBtn" class="px-3.5 py-2 rounded-lg font-bold bg-emerald-600 hover:bg-emerald-700 text-white">⬇ 엑셀 저장</button>
+    <label class="px-3 py-2 rounded-lg font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-700 cursor-pointer">
+      ⬆ 엑셀 불러오기<input id="importInput" type="file" accept=".xlsx" class="hidden">
+    </label>
+  </div>
+</header>
+
+<main class="flex-1 flex flex-col lg:flex-row overflow-hidden">
+  <!-- 왼쪽: 학생 집중 입력 패드 -->
+  <aside class="w-full lg:w-[440px] xl:w-[470px] bg-white border-r border-slate-200 flex flex-col shrink-0 overflow-hidden">
+    <div class="p-3.5 bg-indigo-50/70 border-b border-indigo-100 flex items-center justify-between">
+      <div class="flex items-center gap-2.5">
+        <span id="padBadge" class="px-2.5 py-1 bg-indigo-600 text-white font-bold text-sm rounded-lg">1번</span>
+        <div>
+          <div class="flex items-center gap-1.5">
+            <input id="padName" placeholder="이름(선택, 전송 안 됨)" class="bg-white border border-indigo-200 rounded px-2 py-0.5 text-sm font-bold w-40">
+          </div>
+          <p id="gradeHint" class="text-[11px] text-indigo-600 mt-0.5"></p>
+        </div>
+      </div>
+      <div class="flex gap-1">
+        <button id="prevBtn" class="px-2 py-1 rounded-lg bg-white border border-slate-200 hover:bg-slate-50" title="이전 학생">▲</button>
+        <button id="nextBtn" class="px-2 py-1 rounded-lg bg-white border border-slate-200 hover:bg-slate-50" title="다음 학생">▼</button>
+      </div>
+    </div>
+
+    <div id="tabs" class="grid grid-cols-4 border-b border-slate-200 bg-slate-50 text-xs font-bold text-slate-600 shrink-0"></div>
+
+    <div class="flex-1 overflow-y-auto p-4 space-y-4">
+      <div class="bg-slate-50 rounded-xl p-3 border border-slate-200">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-xs font-bold text-slate-700">키워드를 누르면 선택한 칸에 추가/삭제돼요</span>
+          <button id="clearFieldBtn" class="text-[11px] text-rose-500 hover:underline">현재 칸 비우기</button>
+        </div>
+        <div id="chips" class="flex flex-wrap gap-1.5 max-h-48 overflow-y-auto p-0.5"></div>
+        <div class="mt-3 pt-2.5 border-t border-slate-200 flex gap-1.5">
+          <input id="customKw" placeholder="자주 쓰는 키워드 직접 추가…" class="flex-1 text-xs bg-white border border-slate-200 rounded-lg px-2.5 py-1.5">
+          <button id="addKwBtn" class="px-2.5 py-1.5 bg-slate-800 text-white text-xs font-semibold rounded-lg">+ 등록</button>
+        </div>
+      </div>
+      <div id="padFields" class="space-y-3"></div>
+    </div>
+
+    <div class="p-3.5 border-t border-slate-200">
+      <button id="padGenBtn" class="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl">✨ 현재 학생 버전 A/B 생성</button>
+    </div>
+  </aside>
+
+  <!-- 오른쪽: 학급 표 -->
+  <section class="flex-1 flex flex-col overflow-hidden">
+    <div class="px-4 py-2.5 bg-white border-b border-slate-200 flex flex-wrap items-center justify-between gap-2 shrink-0 text-xs">
+      <div class="flex items-center gap-3">
+        <span class="font-bold text-slate-700">학급 명렬표 <span id="countBadge" class="ml-1 px-2 py-0.5 bg-slate-100 rounded-full text-[11px]"></span></span>
+        <div id="filters" class="flex gap-1"></div>
+      </div>
+      <div class="flex items-center gap-2">
+        <span class="text-[11px] text-slate-500">행을 누르면 왼쪽 패드와 연결돼요. 표에서 바로 고쳐도 돼요.</span>
+        <button id="deleteSelBtn" class="px-2.5 py-1 rounded font-semibold text-rose-600 hover:bg-rose-50 border border-rose-200">선택 삭제</button>
+      </div>
+    </div>
+    <div class="flex-1 overflow-auto">
+      <table class="w-full border-collapse text-left bg-white">
+        <thead class="bg-slate-100 sticky top-0 z-10 text-[11px] font-bold text-slate-600">
+          <tr>
+            <th class="py-2.5 px-2 w-8 text-center"><input type="checkbox" id="checkAll"></th>
+            <th class="py-2.5 px-2 w-20 text-center">번호/이름</th>
+            <th class="py-2.5 px-2 w-[12%]">① 성격/장점</th>
+            <th class="py-2.5 px-2 w-[14%]">② 역할/사례</th>
+            <th class="py-2.5 px-2 w-[12%]">③ 학습 태도</th>
+            <th class="py-2.5 px-2 w-[14%]">④ 보완점/변화</th>
+            <th class="py-2.5 px-3 min-w-[360px]">행동특성 및 종합의견 (A/B 선택 = 엑셀 최종본)</th>
+            <th class="py-2.5 px-2 w-24 text-center">작업</th>
+          </tr>
+        </thead>
+        <tbody id="tbody" class="divide-y divide-slate-200 text-xs"></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<!-- 설정 -->
+<div id="settingsModal" class="modal fixed inset-0 bg-slate-900/50 z-50 hidden items-center justify-center p-4">
+  <div class="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden text-xs">
+    <div class="px-5 py-4 bg-slate-50 border-b flex justify-between items-center">
+      <h2 class="font-bold text-base">설정</h2><button data-close class="text-lg text-slate-400">✕</button>
+    </div>
+    <div class="p-5 overflow-y-auto space-y-4">
+      <div class="p-4 bg-indigo-50 rounded-xl border border-indigo-200 space-y-2">
+        <label class="font-bold text-sm text-indigo-950">선생님 비밀번호</label>
+        <p class="text-slate-600">Vercel에 등록한 TEACHER_PASSWORD와 같은 값이에요. 이 브라우저에만 저장돼요.</p>
+        <div class="flex gap-2">
+          <input id="pwInput" type="password" class="flex-1 bg-white border border-indigo-200 rounded-lg px-3 py-2">
+          <button id="pwSaveBtn" class="px-4 py-2 bg-indigo-600 text-white font-bold rounded-lg">저장·확인</button>
+        </div>
+        <p id="pwStatus" class="font-semibold"></p>
+      </div>
+      <div class="flex items-center gap-2">
+        <label class="font-bold text-sm">NEIS 제한 바이트</label>
+        <input id="maxBytesInput" type="number" min="300" max="3000" step="100" class="w-24 border border-slate-300 rounded-lg px-2 py-1.5">
+        <span class="text-slate-500">초등 행동특성 및 종합의견 기본 1500바이트(한글 약 500자)</span>
+      </div>
+      <div class="space-y-1.5">
+        <div class="flex justify-between items-center">
+          <label class="font-bold text-sm">AI 작성 지침 (직접 수정 가능)</label>
+          <button id="promptResetBtn" class="text-indigo-600 hover:underline font-semibold">기본 지침 복원</button>
+        </div>
+        <textarea id="promptInput" rows="14" class="w-full font-mono bg-slate-50 border border-slate-300 rounded-xl p-3 leading-relaxed"></textarea>
+        <p class="text-slate-500">학년군 지침, 분량, 출력 형식은 서버가 자동으로 덧붙여요.</p>
+      </div>
+      <div class="pt-2 border-t">
+        <button id="resetAllBtn" class="px-3 py-2 rounded-lg font-semibold bg-rose-50 text-rose-600 hover:bg-rose-100">모든 입력·결과 지우기</button>
+      </div>
+    </div>
+    <div class="px-5 py-3 bg-slate-50 border-t flex justify-end"><button data-close class="px-4 py-2 bg-slate-800 text-white font-bold rounded-lg">닫기</button></div>
+  </div>
+</div>
+
+<!-- 번호 관리 -->
+<div id="rosterModal" class="modal fixed inset-0 bg-slate-900/50 z-50 hidden items-center justify-center p-4">
+  <div class="bg-white rounded-2xl max-w-md w-full shadow-2xl overflow-hidden text-xs">
+    <div class="px-5 py-4 bg-slate-50 border-b flex justify-between items-center">
+      <h2 class="font-bold text-base">번호 관리</h2><button data-close class="text-lg text-slate-400">✕</button>
+    </div>
+    <div class="p-5 space-y-5">
+      <div class="space-y-2">
+        <h3 class="font-bold text-sm">번호 목록으로 한 번에 정하기</h3>
+        <p class="text-slate-500">쉼표와 물결표로 적어요. 예: 1~16, 41~51, 53 (이미 입력한 내용은 유지돼요)</p>
+        <div class="flex gap-2">
+          <input id="rosterSpec" class="flex-1 bg-slate-50 border border-slate-300 rounded-lg px-3 py-2">
+          <button id="rosterApplyBtn" class="px-4 py-2 bg-indigo-600 text-white font-bold rounded-lg">적용</button>
+        </div>
+        <p class="text-rose-500">목록에서 빠진 번호의 학생은 삭제돼요.</p>
+      </div>
+      <hr>
+      <div class="space-y-2">
+        <h3 class="font-bold text-sm">한 명 추가</h3>
+        <div class="flex gap-2">
+          <input id="addNum" type="number" placeholder="번호" class="w-24 bg-slate-50 border border-slate-300 rounded-lg px-3 py-2">
+          <input id="addName" placeholder="이름(선택)" class="flex-1 bg-slate-50 border border-slate-300 rounded-lg px-3 py-2">
+          <button id="addOneBtn" class="px-4 py-2 bg-emerald-600 text-white font-bold rounded-lg">추가</button>
+        </div>
+      </div>
+    </div>
+    <div class="px-5 py-3 bg-slate-50 border-t flex justify-end"><button data-close class="px-4 py-2 bg-slate-800 text-white font-bold rounded-lg">닫기</button></div>
+  </div>
+</div>
+
+<!-- 확인창 -->
+<div id="confirmModal" class="modal fixed inset-0 bg-slate-900/50 z-[60] hidden items-center justify-center p-4">
+  <div class="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl space-y-4">
+    <h3 id="confirmTitle" class="font-bold text-sm"></h3>
+    <p id="confirmDesc" class="text-xs text-slate-500 whitespace-pre-line"></p>
+    <div class="flex justify-end gap-2 text-xs">
+      <button id="confirmNo" class="px-3.5 py-2 rounded-lg bg-slate-100 font-semibold">취소</button>
+      <button id="confirmYes" class="px-3.5 py-2 rounded-lg bg-rose-600 text-white font-bold">확인</button>
+    </div>
+  </div>
+</div>
+
+<div id="toasts" class="fixed bottom-4 right-4 z-[70] flex flex-col gap-2 pointer-events-none"></div>
+
+<script>
+/* ============ 1. 기본 데이터 ============ */
+const STORE_KEY = 'haengbal_state_v2';
+const PW_KEY = 'haengbal_teacher_pw';
+const DEFAULT_ROSTER = '1~16, 41~51, 53';
+
+const DEFAULT_PROMPT = `# 역할
+당신은 대한민국 초등학교 담임교사이며 학교생활기록부 기재요령을 잘 아는 전문가입니다. 교사가 준 [학생 관찰 자료]만을 근거로 NEIS '행동특성 및 종합의견'을 작성합니다.
+
+# 반드시 지킬 원칙
+1. 문장 끝은 '~함.', '~음.', '~임.', '~보임.', '~기대됨.' 같은 명사형 종결어미로 끝맺음.
+2. 관찰 자료에 없는 사실·사례·단점을 새로 만들어 내지 말 것. 비어 있는 항목은 다루지 않거나 자료에 있는 내용 범위 안에서만 일반화할 것.
+3. 학생 이름, '이 학생은' 같은 주어는 쓰지 않음.
+4. 기재 금지: 교외 수상, 사교육(학원·과외 등), 공인어학시험, 해외 연수, 부모의 사회·경제적 지위, 학교 밖 특정 기관·대회·상호명.
+5. 보완점은 비난하거나 단정하지 말고, 지도와 노력으로 나아지고 있는 과정과 기대되는 모습으로 서술함.
+6. 추상적 칭찬만 나열하지 말고 자료의 구체적 사례를 근거로 특성을 드러냄.
+7. 자연스러운 한 문단으로 쓰고 줄바꿈·번호·괄호 머리말은 쓰지 않음.
+
+# 서술 순서 (4단)
+도입(성격·핵심 강점) → 교우관계·학급 역할 사례 → 학습 태도·자기관리 → 보완점의 변화와 기대
+
+# 두 가지 버전
+- versionA: 인성·교우관계 중심
+- versionB: 학습 태도·성장 중심
+두 버전은 같은 사실을 바탕으로 하되 강조점과 문장을 다르게 씀.`;
+
+const GRADE_HINTS = {
+  low: '저학년: 기본생활습관, 학교 적응, 규칙, 친구와 어울리기 중심',
+  mid: '중학년: 학급 규칙, 협동심, 또래 관계, 호기심·탐구 태도 중심',
+  high: '고학년: 자기주도 학습, 리더십·팔로워십, 갈등 조정, 책임감 중심'
+};
+
+const FIELDS = [
+  { key:'personality', label:'① 성격/장점', title:'성격 및 핵심 장점', ph:'예: 밝고 명랑함, 친구 말을 잘 들어줌' },
+  { key:'episode', label:'② 역할/사례', title:'학급 역할 및 구체적 사례', ph:'예: 우유 당번을 빠짐없이 함; 소외된 친구를 챙김' },
+  { key:'learning', label:'③ 학습 태도', title:'학습 태도 및 자기관리', ph:'예: 수학 문제를 끝까지 풀어냄' },
+  { key:'growth', label:'④ 보완점/변화', title:'보완점 및 지도 후 변화', ph:'예: 성격이 급해 실수가 있었으나 다시 확인하는 습관을 기르는 중임' }
+];
+
+const DEFAULT_KEYWORDS = {
+  personality: ["밝고 명랑함","온화하고 차분함","경청하는 태도가 우수함","공감 능력이 뛰어남","예의가 바르고 인사성이 좋음","긍정적인 에너지를 지님","유머러스하고 재치 있음","책임감이 강함","궂은일에 솔선수범함","정직하고 성실함","감수성이 풍부함","포용력이 넓고 너그러움","자기주도적이고 독립적임","신중하고 사려 깊음","호기심이 많고 활발함"],
+  episode: ["1인 1역(우유·칠판·환경·도서 당번)을 한 학기 내내 성실히 수행함","모둠 활동 시 소외된 친구를 살뜰히 챙기며 참여를 독려함","친구 간 갈등 상황에서 양쪽 이야기를 듣고 평화적으로 중재함","학급 회의에서 학급 발전을 위한 건설적인 의견을 제시함","도움이 필요한 친구의 학습 준비를 자발적으로 도움","청소 시간에 교실 구석까지 깔끔하게 정리함","급식 당번으로 질서 있게 배식 봉사를 함","체육 활동에서 승패보다 친구들을 격려하며 팀워크를 우선함","학급 문고 정리와 독서 분위기 조성에 앞장섬","전학 온 친구에게 먼저 다가가 학교생활을 안내함"],
+  learning: ["수업 시간 집중도가 매우 높음","자신의 생각을 조리 있게 발표함","수학·과학 탐구 문제 해결에 끈기 있게 도전함","독서량이 풍부하고 어휘 구사력이 우수함","미술·만들기 시간에 독창적 표현력을 발휘함","배움 공책을 체계적으로 정리함","모르는 내용을 적극적으로 질문하여 해결함","모둠 과제에서 자료 조사와 역할 분담을 이끔","실험 수업에서 안전 규칙을 지키며 탐구에 몰입함","음악·신체 표현 활동에서 표현력이 돋보임"],
+  growth: ["성격이 급해 실수가 잦았으나 차분히 재검토하는 습관을 기르는 중임","자기주장이 강했으나 친구 의견을 경청하고 양보하려 노력함","발표를 주저했으나 소집단 활동부터 자신감을 키워 발표가 늘어남","수업 중 주의가 흩어지곤 했으나 체험 활동을 통해 집중 시간이 길어짐","준비물 챙기기가 미흡했으나 알림장 확인 습관으로 스스로 챙기게 됨","감정 표현이 서툴러 오해가 있었으나 부드러운 말투를 연습하며 교우관계가 원만해짐","새로운 도전을 두려워했으나 작은 성공 경험을 쌓으며 자신감 있게 참여함","정리정돈이 부족했으나 체크리스트를 실천하며 자기관리가 좋아짐"]
+};
+
+// 사람이 꼭 다시 봐야 할 단어 (자동으로 바꾸지 않고 표시만 함)
+const WATCH_WORDS = ['학원','과외','영재','토익','토플','텝스','어학연수','해외','올림피아드','경시대회','자격증','수상','부모','아버지','어머니'];
+
+/* ============ 2. 상태 ============ */
+let state = {
+  grade: '4',
+  maxBytes: 1500,
+  prompt: DEFAULT_PROMPT,
+  keywords: structuredClone(DEFAULT_KEYWORDS),
+  students: [],
+  activeNum: null
+};
+let category = 'personality';
+let filter = 'all';
+let teacherPw = '';
+const running = new Set(); // 생성 중인 번호
+const errors = {};          // 번호 -> 오류 메시지 (저장하지 않음)
+
+function newStudent(num, name='') {
+  return { num, name, selected:false, personality:'', episode:'', learning:'', growth:'',
+           versionA:'', versionB:'', pick:'A', editedA:false, editedB:false };
+}
+
+function parseRoster(spec) {
+  const nums = new Set();
+  for (const part of String(spec).split(/[,\s]+/).filter(Boolean)) {
+    const m = part.match(/^(\d+)(?:[~\-](\d+))?$/);
+    if (!m) throw new Error(`'${part}'을(를) 읽을 수 없어요.`);
+    const a = +m[1], b = m[2] ? +m[2] : a;
+    if (a < 1 || b > 99 || a > b) throw new Error(`'${part}' 범위가 올바르지 않아요.`);
+    for (let n = a; n <= b; n++) nums.add(n);
+  }
+  return [...nums].sort((x,y)=>x-y);
+}
+
+function save() {
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch(e) { console.warn(e); }
+}
+function load() {
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (raw) {
+      const s = JSON.parse(raw);
+      if (Array.isArray(s.students) && s.students.length) {
+        state = { ...state, ...s };
+        state.students = s.students.map(st => ({ ...newStudent(st.num), ...st }));
+      }
+    }
+    teacherPw = localStorage.getItem(PW_KEY) || '';
+  } catch(e) { console.warn(e); }
+  if (!state.students.length) state.students = parseRoster(DEFAULT_ROSTER).map(n => newStudent(n));
+  if (!state.students.some(s => s.num === state.activeNum)) state.activeNum = state.students[0].num;
+}
+
+const $ = id => document.getElementById(id);
+const getStudent = num => state.students.find(s => s.num === num);
+const active = () => getStudent(state.activeNum) || state.students[0];
+const band = () => (+state.grade <= 2 ? 'low' : +state.grade <= 4 ? 'mid' : 'high');
+
+/* ============ 3. 바이트 계산 ============ */
+// NEIS 기준: 한글 3바이트, 영문·숫자·공백 1바이트, 줄바꿈 2바이트
+function neis(str='') {
+  let bytes = 0, chars = 0;
+  for (const ch of str) { chars++; bytes += ch === '\n' ? 2 : (ch.codePointAt(0) <= 127 ? 1 : 3); }
+  return { chars, bytes };
+}
+
+function esc(s='') {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+/* ============ 4. 왼쪽 패드 ============ */
+function renderTabs() {
+  $('tabs').innerHTML = FIELDS.map(f => `
+    <button data-tab="${f.key}" class="py-2.5 border-b-2 ${f.key===category ? 'border-indigo-600 text-indigo-600 bg-white' : 'border-transparent hover:text-slate-900'}">${f.label}</button>`).join('');
+}
+
+function renderPadFields() {
+  const st = active();
+  $('padFields').innerHTML = FIELDS.map((f,i) => `
+    <div class="p-3 rounded-xl ${f.key===category ? 'border-2 border-indigo-500 bg-indigo-50/30' : 'border border-slate-200'}">
+      <label class="block text-xs font-bold text-slate-700 mb-1">${i+1}. ${f.title}</label>
+      <textarea data-pad="${f.key}" rows="3" placeholder="${esc(f.ph)}" class="w-full text-xs bg-white border border-slate-200 rounded-lg p-2 focus:outline-none focus:border-indigo-500 resize-none">${esc(st[f.key])}</textarea>
+    </div>`).join('');
+}
+
+function splitParts(text) {
+  return text.split(/\s*[;\n]\s*|,\s+/).map(s => s.trim()).filter(Boolean);
+}
+
+function renderChips() {
+  const val = active()[category] || '';
+  const parts = splitParts(val);
+  $('chips').innerHTML = (state.keywords[category] || []).map((kw, i) => {
+    const on = parts.includes(kw);
+    return `<button data-chip="${i}" class="chip text-xs px-2.5 py-1.5 rounded-lg border text-left ${on ? 'bg-indigo-600 text-white border-indigo-600 font-semibold' : 'bg-white hover:bg-indigo-50 border-slate-200'}">${on ? '✓' : '+'} ${esc(kw)}</button>`;
+  }).join('');
+}
+
+function renderPad() {
+  const st = active();
+  $('padBadge').textContent = `${st.num}번`;
+  $('padName').value = st.name || '';
+  $('gradeHint').textContent = GRADE_HINTS[band()];
+  $('padGenBtn').disabled = running.has(st.num);
+  $('padGenBtn').textContent = running.has(st.num) ? '생성 중…' : `✨ ${st.num}번 버전 A/B 생성`;
+  renderTabs(); renderPadFields(); renderChips();
+}
+
+function setCategory(key, focus=true) {
+  category = key;
+  renderTabs(); renderPadFields(); renderChips();
+  if (focus) document.querySelector(`[data-pad="${key}"]`)?.focus();
+}
+
+function setField(num, key, value, from) {
+  const st = getStudent(num); if (!st) return;
+  st[key] = value;
+  if (from !== 'table') { const t = document.querySelector(`[data-cell="${num}-${key}"]`); if (t) t.value = value; }
+  if (from !== 'pad' && num === state.activeNum) {
+    const p = key === 'name' ? $('padName') : document.querySelector(`[data-pad="${key}"]`);
+    if (p && p.value !== value) p.value = value;
+  }
+  if (key === category && num === state.activeNum) renderChips();
+  save();
+}
+
+function toggleKeyword(kw) {
+  const st = active();
+  const parts = splitParts(st[category] || '');
+  const i = parts.indexOf(kw);
+  if (i > -1) parts.splice(i, 1); else parts.push(kw);
+  setField(st.num, category, parts.join('; '));
+}
+
+/* ============ 5. 표 ============ */
+const isDone = s => !!(s.versionA || s.versionB);
+function filtered() {
+  return state.students.filter(s =>
+    filter === 'front' ? s.num <= 40 :
+    filter === 'back' ? s.num > 40 :
+    filter === 'done' ? isDone(s) :
+    filter === 'todo' ? !isDone(s) : true);
+}
+
+function renderFilters() {
+  const nums = state.students.map(s=>s.num);
+  const hasBack = nums.some(n => n > 40), hasFront = nums.some(n => n <= 40);
+  const list = [['all','전체']];
+  if (hasFront && hasBack) {
+    const f = nums.filter(n=>n<=40), b = nums.filter(n=>n>40);
+    list.push(['front', `${f[0]}~${f.at(-1)}번`], ['back', `${b[0]}~${b.at(-1)}번`]);
+  }
+  list.push(['done','생성 완료'], ['todo','미생성']);
+  $('filters').innerHTML = list.map(([k,l]) => `<button data-filter="${k}" class="px-2.5 py-1 rounded-md ${filter===k ? 'bg-slate-800 text-white font-semibold' : 'text-slate-600 hover:bg-slate-100'}">${l}</button>`).join('');
+  const done = state.students.filter(isDone).length;
+  $('countBadge').textContent = `총 ${state.students.length}명 · 생성 ${done}명`;
+}
+
+function watchHits(text) { return WATCH_WORDS.filter(w => text.includes(w)); }
+
+function counterHtml(s) {
+  const text = s.pick === 'B' ? s.versionB : s.versionA;
+  const { chars, bytes } = neis(text || '');
+  const over = bytes > state.maxBytes;
+  const cls = over ? 'text-rose-600 font-bold' : (text ? 'text-emerald-600 font-semibold' : 'text-slate-400');
+  const hits = watchHits(text || '');
+  return `<span class="${cls}">${chars}자 / ${bytes}B</span><span class="text-slate-400"> / ${state.maxBytes}B</span>${over ? ' <span class="text-rose-600 font-bold">초과</span>' : ''}${hits.length ? ` <span class="text-amber-600 font-bold" title="기재요령 확인 필요">⚠ ${esc(hits.join(', '))}</span>` : ''}`;
+}
+
+function rowHtml(s) {
+  const text = s.pick === 'B' ? s.versionB : s.versionA;
+  const busy = running.has(s.num);
+  const err = errors[s.num];
+  const edited = s.pick === 'B' ? s.editedB : s.editedA;
+  const cell = f => `<td class="py-2 px-1.5 align-top"><textarea data-cell="${s.num}-${f.key}" rows="4" placeholder="${f.label}" class="w-full text-xs p-2 rounded-lg border border-slate-200 bg-slate-50/50 focus:bg-white focus:outline-none focus:border-indigo-500 resize-none leading-relaxed">${esc(s[f.key])}</textarea></td>`;
+  const verBtn = (v, color) => `<button data-ver="${s.num}-${v}" class="px-2 py-0.5 rounded text-[11px] font-bold ${s.pick===v ? color : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}">버전 ${v}${v==='A'?' 인성·교우':' 학습·성장'}</button>`;
+  return `
+  <tr data-row="${s.num}" class="hover:bg-slate-50 cursor-pointer ${s.num===state.activeNum ? 'active-row' : ''}">
+    <td class="py-2.5 px-2 text-center align-top pt-4"><input type="checkbox" data-check="${s.num}" ${s.selected?'checked':''}></td>
+    <td class="py-2.5 px-2 align-top text-center">
+      <div class="inline-block px-2 py-0.5 rounded-md font-bold ${s.num<=40 ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'bg-purple-50 text-purple-700 border border-purple-200'}">${s.num}번</div>
+      <input data-cell="${s.num}-name" value="${esc(s.name)}" placeholder="이름" class="mt-1.5 w-full text-center text-xs font-semibold bg-transparent border-b border-transparent hover:border-slate-300 focus:border-indigo-500 focus:outline-none">
+    </td>
+    ${FIELDS.map(cell).join('')}
+    <td class="py-2 px-2.5 align-top">
+      <div class="border ${err ? 'border-rose-300' : 'border-slate-200'} rounded-xl bg-white p-2">
+        <div class="flex flex-wrap items-center justify-between gap-1 mb-1.5 pb-1 border-b border-slate-100">
+          <div class="flex gap-1">${verBtn('A','bg-indigo-600 text-white')}${verBtn('B','bg-emerald-600 text-white')}
+            ${edited ? '<span class="px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 text-[10px] font-bold">직접 수정함</span>' : ''}</div>
+          <div class="flex items-center gap-2 text-[11px]">
+            <span data-counter="${s.num}">${counterHtml(s)}</span>
+            <button data-copy="${s.num}" class="px-2 py-0.5 rounded bg-slate-100 hover:bg-slate-200 font-semibold">복사</button>
+          </div>
+        </div>
+        ${err ? `<p class="text-rose-600 font-semibold mb-1">⚠ ${esc(err)}</p>` : ''}
+        <textarea data-result="${s.num}" rows="4" placeholder="${busy ? 'ChatGPT가 작성 중이에요…' : '[AI 생성]을 누르면 버전 A/B가 만들어져요.'}" class="w-full text-xs bg-transparent focus:outline-none resize-y leading-relaxed">${esc(text)}</textarea>
+      </div>
+    </td>
+    <td class="py-2.5 px-2 align-top text-center space-y-1.5">
+      <button data-gen="${s.num}" ${busy?'disabled':''} class="w-full py-1.5 px-2 ${busy ? 'bg-slate-300' : 'bg-indigo-600 hover:bg-indigo-700'} text-white font-bold text-[11px] rounded-lg whitespace-nowrap">${busy ? '<span class="spin">◌</span> 생성중' : (isDone(s) ? '↻ 다시 생성' : '✨ AI 생성')}</button>
+      <button data-clear="${s.num}" class="w-full py-1 px-2 bg-slate-100 hover:bg-rose-50 text-slate-500 hover:text-rose-600 text-[11px] rounded-lg">비우기</button>
+    </td>
+  </tr>`;
+}
+
+function renderTable() {
+  renderFilters();
+  const list = filtered();
+  $('tbody').innerHTML = list.length ? list.map(rowHtml).join('') :
+    `<tr><td colspan="8" class="py-12 text-center text-slate-400">표시할 학생이 없어요.</td></tr>`;
+  $('checkAll').checked = list.length > 0 && list.every(s => s.selected);
+}
+
+function refreshRow(num) {
+  const tr = document.querySelector(`tr[data-row="${num}"]`);
+  const s = getStudent(num);
+  if (tr && s) tr.outerHTML = rowHtml(s);
+  renderFilters();
+  if (num === state.activeNum) {
+    $('padGenBtn').disabled = running.has(num);
+    $('padGenBtn').textContent = running.has(num) ? '생성 중…' : `✨ ${num}번 버전 A/B 생성`;
+  }
+}
+
+function selectStudent(num, cat) {
+  if (state.activeNum === num && !cat) return;
+  state.activeNum = num;
+  document.querySelectorAll('tr[data-row]').forEach(tr => tr.classList.toggle('active-row', +tr.dataset.row === num));
+  if (cat) category = cat;
+  renderPad(); save();
+}
+
+/* ============ 6. 생성 ============ */
+async function api(body) {
+  const res = await fetch('/api/generate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-teacher-password': teacherPw },
+    body: JSON.stringify(body)
+  });
+  let data = {};
+  try { data = await res.json(); } catch {}
+  if (!res.ok) {
+    const e = new Error(data.error || `서버 오류 (${res.status})`);
+    e.status = res.status; throw e;
+  }
+  return data;
+}
+
+// 입력 칸에 학생 이름이 적혀 있으면 '학생'으로 바꿔서 보냄
+function stripName(text, name) {
+  if (!name || name.trim().length < 2) return text;
+  const n = name.trim();
+  const given = n.length >= 3 ? n.slice(1) : null;
+  let t = text.split(n).join('학생');
+  if (given) t = t.split(given).join('학생');
+  return t;
+}
+
+function hasInput(s) { return FIELDS.some(f => (s[f.key] || '').trim()); }
+
+async function generate(num, { skipConfirm=false } = {}) {
+  const s = getStudent(num);
+  if (!s || running.has(num)) return false;
+  if (!hasInput(s)) { toast(`${num}번: 관찰 자료를 한 칸 이상 입력해 주세요.`, 'warn'); return false; }
+  if (!teacherPw) { openModal('settingsModal'); $('pwInput').focus(); toast('먼저 선생님 비밀번호를 저장해 주세요.', 'warn'); return false; }
+  if (!skipConfirm && (s.editedA || s.editedB)) {
+    const ok = await confirmBox(`${num}번 다시 생성`, '직접 고친 문장이 있어요.\n다시 생성하면 고친 내용이 사라져요. 계속할까요?');
+    if (!ok) return false;
+  }
+
+  running.add(num); delete errors[num]; refreshRow(num);
+  try {
+    const fields = {};
+    FIELDS.forEach(f => fields[f.key] = stripName(s[f.key] || '', s.name));
+    const prompt = state.prompt.trim() === DEFAULT_PROMPT.trim() ? '' : state.prompt;
+    const r = await api({ grade: state.grade, maxBytes: state.maxBytes, masterPrompt: prompt, fields });
+    s.versionA = r.versionA; s.versionB = r.versionB;
+    s.editedA = s.editedB = false;
+    save();
+    return true;
+  } catch (e) {
+    errors[num] = e.message;
+    if (e.status === 401) { teacherPw = ''; localStorage.removeItem(PW_KEY); }
+    return false;
+  } finally {
+    running.delete(num); refreshRow(num);
+  }
+}
+
+async function generateBatch() {
+  let targets = state.students.filter(s => s.selected && hasInput(s));
+  const fromChecked = targets.length > 0;
+  if (!fromChecked) targets = state.students.filter(s => hasInput(s) && !isDone(s));
+  if (!targets.length) {
+    toast('생성할 학생이 없어요. 체크하거나, 아직 생성 안 된 학생의 관찰 자료를 입력해 주세요.', 'warn'); return;
+  }
+  if (!teacherPw) { openModal('settingsModal'); toast('먼저 선생님 비밀번호를 저장해 주세요.', 'warn'); return; }
+  const editedCount = targets.filter(s => s.editedA || s.editedB).length;
+  const ok = await confirmBox('일괄 생성',
+    `${fromChecked ? '체크한' : '아직 생성하지 않은'} 학생 ${targets.length}명을 생성할게요.` +
+    (editedCount ? `\n그중 ${editedCount}명은 직접 고친 문장이 덮어쓰여요.` : ''));
+  if (!ok) return;
+
+  const btn = $('batchBtn'); btn.disabled = true;
+  let done = 0, fail = 0, idx = 0;
+  const worker = async () => {
+    while (idx < targets.length) {
+      const s = targets[idx++];
+      const okOne = await generate(s.num, { skipConfirm:true });
+      okOne ? done++ : fail++;
+      btn.textContent = `생성 중 ${done + fail}/${targets.length}`;
+      if (!teacherPw) { idx = targets.length; } // 비밀번호 오류면 중단
+    }
+  };
+  await Promise.all([worker(), worker(), worker()]); // 동시에 3명씩
+  btn.disabled = false; btn.textContent = '✨ 일괄 생성';
+  toast(fail ? `완료 ${done}명, 실패 ${fail}명 (빨간 표시를 확인해 주세요)` : `${done}명 생성 완료!`, fail ? 'warn' : 'ok');
+}
+
+/* ============ 7. 엑셀 ============ */
+const XL = { num:'번호', name:'이름', personality:'① 성격/장점', episode:'② 역할/사례', learning:'③ 학습 태도', growth:'④ 보완점/변화',
+             final:'최종 행발 (NEIS 입력용)', chars:'글자수', bytes:'바이트', pick:'선택 버전', A:'버전 A (인성·교우)', B:'버전 B (학습·성장)' };
+
+function exportExcel() {
+  const rows = state.students.map(s => {
+    const final = (s.pick === 'B' ? s.versionB : s.versionA) || '';
+    const n = neis(final);
+    return { [XL.num]: s.num, [XL.name]: s.name || '', [XL.personality]: s.personality, [XL.episode]: s.episode,
+      [XL.learning]: s.learning, [XL.growth]: s.growth, [XL.final]: final, [XL.chars]: n.chars, [XL.bytes]: n.bytes,
+      [XL.pick]: s.pick, [XL.A]: s.versionA, [XL.B]: s.versionB };
+  });
+  const ws = XLSX.utils.json_to_sheet(rows);
+  ws['!cols'] = [6,10,28,35,28,35,70,8,8,8,60,60].map(w => ({ wch:w }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, `${state.grade}학년 행발`);
+  const d = new Date(); const ymd = `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
+  XLSX.writeFile(wb, `${state.grade}학년_행동특성및종합의견_${ymd}.xlsx`);
+  toast('엑셀 파일을 저장했어요.');
+}
+
+async function importExcel(file) {
+  try {
+    const wb = XLSX.read(await file.arrayBuffer());
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval:'' });
+    const list = rows.filter(r => +r[XL.num] > 0).map(r => ({
+      ...newStudent(+r[XL.num], String(r[XL.name] || '')),
+      personality: String(r[XL.personality]||''), episode: String(r[XL.episode]||''),
+      learning: String(r[XL.learning]||''), growth: String(r[XL.growth]||''),
+      versionA: String(r[XL.A]||''), versionB: String(r[XL.B]||''), pick: r[XL.pick] === 'B' ? 'B' : 'A'
+    }));
+    if (!list.length) throw new Error('이 앱에서 저장한 엑셀 형식이 아니에요.');
+    const ok = await confirmBox('엑셀 불러오기', `${list.length}명의 자료로 지금 화면을 바꿀까요?\n지금 입력된 내용은 사라져요.`);
+    if (!ok) return;
+    state.students = list.sort((a,b)=>a.num-b.num);
+    state.activeNum = state.students[0].num;
+    save(); renderTable(); renderPad();
+    toast(`${list.length}명 불러오기 완료`);
+  } catch (e) { toast(`불러오기 실패: ${e.message}`, 'warn'); }
+}
+
+/* ============ 8. 공통 UI ============ */
+function openModal(id) { $(id).classList.remove('hidden'); $(id).classList.add('flex'); }
+function closeModal(id) { $(id).classList.add('hidden'); $(id).classList.remove('flex'); }
+
+function confirmBox(title, desc) {
+  return new Promise(resolve => {
+    $('confirmTitle').textContent = title; $('confirmDesc').textContent = desc;
+    openModal('confirmModal');
+    const done = v => { closeModal('confirmModal'); $('confirmYes').onclick = $('confirmNo').onclick = null; resolve(v); };
+    $('confirmYes').onclick = () => done(true);
+    $('confirmNo').onclick = () => done(false);
+  });
+}
+
+function toast(msg, type='ok') {
+  const el = document.createElement('div');
+  el.className = `${type==='warn' ? 'bg-amber-600' : 'bg-slate-900'} text-white text-xs font-semibold px-4 py-3 rounded-xl shadow-lg transition-all duration-300`;
+  el.textContent = msg;
+  $('toasts').appendChild(el);
+  setTimeout(() => { el.style.opacity = '0'; setTimeout(() => el.remove(), 300); }, 3000);
+}
+
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); }
+  catch { const t = document.createElement('textarea'); t.value = text; document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove(); }
+}
+
+/* ============ 9. 이벤트 ============ */
+function bind() {
+  document.addEventListener('click', async e => {
+    const t = e.target.closest('button, input[type=checkbox], tr[data-row]');
+    if (!t) return;
+    const d = t.dataset;
+    if (d.open) return openModal(d.open);
+    if ('close' in d) return closeModal(t.closest('.modal').id);
+    if (d.tab) return setCategory(d.tab);
+    if (d.chip !== undefined) return toggleKeyword(state.keywords[category][+d.chip]);
+    if (d.filter) { filter = d.filter; return renderTable(); }
+    if (d.check) { getStudent(+d.check).selected = t.checked; return save(); }
+    if (d.ver) {
+      const [n, v] = d.ver.split('-'); const s = getStudent(+n); s.pick = v; save(); return refreshRow(+n);
+    }
+    if (d.copy) {
+      const s = getStudent(+d.copy); const text = s.pick === 'B' ? s.versionB : s.versionA;
+      if (!text) return toast('복사할 문장이 없어요.', 'warn');
+      await copyText(text); return toast(`${s.num}번 버전 ${s.pick} 복사 완료`);
+    }
+    if (d.gen) { selectStudent(+d.gen); return generate(+d.gen); }
+    if (d.clear) {
+      const s = getStudent(+d.clear);
+      if (!(await confirmBox(`${s.num}번 비우기`, '관찰 자료와 생성 결과를 모두 지울까요?'))) return;
+      Object.assign(s, { personality:'', episode:'', learning:'', growth:'', versionA:'', versionB:'', editedA:false, editedB:false });
+      delete errors[s.num]; save(); refreshRow(s.num); if (s.num === state.activeNum) renderPad(); return;
+    }
+    if (d.row && !e.target.closest('textarea, input')) return selectStudent(+d.row);
+  });
+
+  document.addEventListener('focusin', e => {
+    const c = e.target.dataset?.cell;
+    if (c) { const [n, k] = c.split('-'); selectStudent(+n, k === 'name' ? null : k); }
+    const p = e.target.dataset?.pad;
+    if (p && p !== category) { category = p; renderTabs(); renderChips();
+      document.querySelectorAll('[data-pad]').forEach(el => el.parentElement.className = `p-3 rounded-xl ${el.dataset.pad===p ? 'border-2 border-indigo-500 bg-indigo-50/30' : 'border border-slate-200'}`); }
+  });
+
+  document.addEventListener('input', e => {
+    const d = e.target.dataset;
+    if (d.cell) { const [n, k] = d.cell.split('-'); return setField(+n, k, e.target.value, 'table'); }
+    if (d.pad) return setField(state.activeNum, d.pad, e.target.value, 'pad');
+    if (d.result) {
+      const s = getStudent(+d.result);
+      if (s.pick === 'B') { s.versionB = e.target.value; s.editedB = true; } else { s.versionA = e.target.value; s.editedA = true; }
+      const c = document.querySelector(`[data-counter="${s.num}"]`); if (c) c.innerHTML = counterHtml(s);
+      return save();
+    }
+  });
+
+  $('padName').addEventListener('input', e => setField(state.activeNum, 'name', e.target.value, 'pad'));
+  $('prevBtn').onclick = () => move(-1);
+  $('nextBtn').onclick = () => move(1);
+  $('clearFieldBtn').onclick = () => setField(state.activeNum, category, '');
+  $('addKwBtn').onclick = addKeyword;
+  $('customKw').addEventListener('keydown', e => { if (e.key === 'Enter') addKeyword(); });
+  $('padGenBtn').onclick = () => generate(state.activeNum);
+  $('batchBtn').onclick = generateBatch;
+  $('exportBtn').onclick = exportExcel;
+  $('importInput').onchange = e => { if (e.target.files[0]) importExcel(e.target.files[0]); e.target.value = ''; };
+  $('checkAll').onchange = e => { filtered().forEach(s => s.selected = e.target.checked); save(); renderTable(); };
+  $('gradeSelect').onchange = e => { state.grade = e.target.value; save(); renderPad(); toast(`${state.grade}학년 지침으로 생성해요.`); };
+
+  $('deleteSelBtn').onclick = async () => {
+    const sel = state.students.filter(s => s.selected);
+    if (!sel.length) return toast('삭제할 학생을 체크해 주세요.', 'warn');
+    if (sel.length === state.students.length) return toast('최소 1명은 남아 있어야 해요.', 'warn');
+    if (!(await confirmBox('선택 삭제', `${sel.map(s=>s.num+'번').join(', ')}을(를) 명렬표에서 삭제할까요?`))) return;
+    state.students = state.students.filter(s => !s.selected);
+    if (!getStudent(state.activeNum)) state.activeNum = state.students[0].num;
+    save(); renderTable(); renderPad();
+  };
+
+  // 설정
+  $('pwSaveBtn').onclick = async () => {
+    teacherPw = $('pwInput').value.trim();
+    $('pwStatus').className = 'font-semibold text-slate-500'; $('pwStatus').textContent = '확인 중…';
+    try {
+      await api({ check:true });
+      localStorage.setItem(PW_KEY, teacherPw);
+      $('pwStatus').className = 'font-semibold text-emerald-600'; $('pwStatus').textContent = '✓ 비밀번호가 맞아요. 저장했어요.';
+    } catch (e) {
+      teacherPw = ''; localStorage.removeItem(PW_KEY);
+      $('pwStatus').className = 'font-semibold text-rose-600'; $('pwStatus').textContent = `✕ ${e.message}`;
+    }
+  };
+  $('maxBytesInput').onchange = e => {
+    state.maxBytes = Math.min(3000, Math.max(300, +e.target.value || 1500)); e.target.value = state.maxBytes; save(); renderTable();
+  };
+  $('promptInput').oninput = e => { state.prompt = e.target.value; save(); };
+  $('promptResetBtn').onclick = () => { state.prompt = DEFAULT_PROMPT; $('promptInput').value = DEFAULT_PROMPT; save(); toast('기본 지침으로 복원했어요.'); };
+  $('resetAllBtn').onclick = async () => {
+    if (!(await confirmBox('모두 지우기', '모든 학생의 관찰 자료와 생성 결과를 지울까요?\n(필요하면 먼저 엑셀로 저장해 두세요)'))) return;
+    state.students = state.students.map(s => newStudent(s.num, s.name));
+    save(); renderTable(); renderPad(); closeModal('settingsModal'); toast('모두 지웠어요.');
+  };
+
+  // 번호 관리
+  $('rosterApplyBtn').onclick = async () => {
+    let nums;
+    try { nums = parseRoster($('rosterSpec').value); } catch (e) { return toast(e.message, 'warn'); }
+    if (!nums.length) return toast('번호를 입력해 주세요.', 'warn');
+    const removed = state.students.filter(s => !nums.includes(s.num) && (hasInput(s) || isDone(s)));
+    if (removed.length && !(await confirmBox('번호 적용', `${removed.map(s=>s.num+'번').join(', ')}의 입력 내용이 삭제돼요. 계속할까요?`))) return;
+    const map = new Map(state.students.map(s => [s.num, s]));
+    state.students = nums.map(n => map.get(n) || newStudent(n));
+    if (!getStudent(state.activeNum)) state.activeNum = state.students[0].num;
+    save(); renderTable(); renderPad(); closeModal('rosterModal'); toast(`${nums.length}명으로 설정했어요.`);
+  };
+  $('addOneBtn').onclick = () => {
+    const n = parseInt($('addNum').value, 10);
+    if (!(n >= 1 && n <= 99)) return toast('1~99 사이 번호를 입력해 주세요.', 'warn');
+    if (getStudent(n)) return toast(`${n}번은 이미 있어요.`, 'warn');
+    state.students.push(newStudent(n, $('addName').value.trim()));
+    state.students.sort((a,b)=>a.num-b.num);
+    $('addNum').value = ''; $('addName').value = '';
+    save(); renderTable(); toast(`${n}번을 추가했어요.`);
+  };
+}
+
+function addKeyword() {
+  const v = $('customKw').value.trim();
+  if (!v) return;
+  const list = state.keywords[category];
+  if (!list.includes(v)) list.unshift(v);
+  $('customKw').value = '';
+  toggleKeyword(v);
+}
+
+function move(dir) {
+  const list = filtered(); if (!list.length) return;
+  const i = list.findIndex(s => s.num === state.activeNum);
+  const next = list[(i + dir + list.length) % list.length];
+  selectStudent(next.num);
+  document.querySelector(`tr[data-row="${next.num}"]`)?.scrollIntoView({ block:'nearest', behavior:'smooth' });
+}
+
+/* ============ 10. 시작 ============ */
+load();
+$('gradeSelect').value = state.grade;
+$('maxBytesInput').value = state.maxBytes;
+$('promptInput').value = state.prompt;
+$('pwInput').value = teacherPw;
+$('rosterSpec').value = (() => {
+  const nums = state.students.map(s=>s.num), out = [];
+  for (let i = 0; i < nums.length; i++) { let j = i; while (nums[j+1] === nums[j]+1) j++; out.push(i===j ? `${nums[i]}` : `${nums[i]}~${nums[j]}`); i = j; }
+  return out.join(', ');
+})();
+bind(); renderTable(); renderPad();
+if (!teacherPw) setTimeout(() => toast('⚙ 설정에서 선생님 비밀번호를 먼저 저장해 주세요.', 'warn'), 600);
+</script>
+</body>
+</html>
