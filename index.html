@@ -163,7 +163,7 @@
     <div class="p-5 space-y-5">
       <div class="space-y-2">
         <h3 class="font-bold text-sm">번호 목록으로 한 번에 정하기</h3>
-        <p class="text-slate-500">쉼표와 물결표로 적어요. 예: 1~16, 41~51, 53 (이미 입력한 내용은 유지돼요)</p>
+        <p class="text-slate-500">번호: <code>1~16, 41~51, 53</code> · 이름을 쉼표로 이어 넣으면 번호 순서대로 이름이 들어가요.</p>
         <div class="flex gap-2">
           <input id="rosterSpec" class="flex-1 bg-slate-50 border border-slate-300 rounded-lg px-3 py-2">
           <button id="rosterApplyBtn" class="px-4 py-2 bg-indigo-600 text-white font-bold rounded-lg">적용</button>
@@ -742,6 +742,10 @@ function bind() {
 
   // 번호 관리
   $('rosterApplyBtn').onclick = async () => {
+    const spec = $('rosterSpec').value;
+    if (/[가-힣A-Za-z]/.test(spec)) {   // 번호 칸에 이름을 넣은 경우 → 이름 넣기로 처리
+      return applyNames(spec, () => { $('rosterSpec').value = rosterText(); });
+    }
     let nums;
     try { nums = parseRoster($('rosterSpec').value); } catch (e) { return toast(e.message, 'warn'); }
     if (!nums.length) return toast('번호를 입력해 주세요.', 'warn');
@@ -752,8 +756,23 @@ function bind() {
     if (!getStudent(state.activeNum)) state.activeNum = state.students[0].num;
     save(); renderTable(); renderPad(); closeModal('rosterModal'); toast(`${nums.length}명으로 설정했어요.`);
   };
-  $('namesApplyBtn').onclick = async () => {
-    const lines = $('namesInput').value.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  $('addOneBtn').onclick = () => {
+    const n = parseInt($('addNum').value, 10);
+    if (!(n >= 1 && n <= 99)) return toast('1~99 사이 번호를 입력해 주세요.', 'warn');
+    if (getStudent(n)) return toast(`${n}번은 이미 있어요.`, 'warn');
+    state.students.push(newStudent(n, $('addName').value.trim()));
+    state.students.sort((a,b)=>a.num-b.num);
+    $('addNum').value = ''; $('addName').value = '';
+    save(); renderTable(); toast(`${n}번을 추가했어요.`);
+  };
+  $('namesApplyBtn').onclick = () => applyNames($('namesInput').value, () => { $('namesInput').value = ''; });
+}
+
+// 명부 텍스트 → 이름 채우기
+async function applyNames(text, onDone) {
+    let lines = String(text).split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    // 숫자 없이 쉼표로 이어 쓴 이름 목록(예: 구자경, 권준영, …)은 한 명씩 나눔
+    lines = lines.flatMap(l => (!/\d/.test(l) && /[,，、]/.test(l)) ? l.split(/[,，、]/).map(x => x.trim()).filter(Boolean) : [l]);
     if (!lines.length) return toast('명부를 붙여 넣어 주세요.', 'warn');
     const pairs = [], namesOnly = [];
     for (const line of lines) {
@@ -791,20 +810,9 @@ function bind() {
     state.students.sort((a, b) => a.num - b.num);
     const missing = state.students.filter(s => !s.name).map(s => s.num + '번');
     save(); renderTable(); renderPad(); closeModal('rosterModal');
-    $('namesInput').value = '';
+    if (onDone) onDone();
     toast(`${filled}명 이름 입력${added ? `, ${added}명 추가` : ''}${skipped.length ? `, ${skipped.length}명 건너뜀` : ''}` +
           (missing.length ? ` · 이름 없는 번호: ${missing.join(', ')}` : ''), missing.length || skipped.length ? 'warn' : 'ok');
-  };
-
-  $('addOneBtn').onclick = () => {
-    const n = parseInt($('addNum').value, 10);
-    if (!(n >= 1 && n <= 99)) return toast('1~99 사이 번호를 입력해 주세요.', 'warn');
-    if (getStudent(n)) return toast(`${n}번은 이미 있어요.`, 'warn');
-    state.students.push(newStudent(n, $('addName').value.trim()));
-    state.students.sort((a,b)=>a.num-b.num);
-    $('addNum').value = ''; $('addName').value = '';
-    save(); renderTable(); toast(`${n}번을 추가했어요.`);
-  };
 }
 
 function addKeyword() {
@@ -830,11 +838,12 @@ $('gradeSelect').value = state.grade;
 $('maxBytesInput').value = state.maxBytes;
 $('promptInput').value = state.prompt;
 $('pwInput').value = teacherPw;
-$('rosterSpec').value = (() => {
+function rosterText() {
   const nums = state.students.map(s=>s.num), out = [];
   for (let i = 0; i < nums.length; i++) { let j = i; while (nums[j+1] === nums[j]+1) j++; out.push(i===j ? `${nums[i]}` : `${nums[i]}~${nums[j]}`); i = j; }
   return out.join(', ');
-})();
+}
+$('rosterSpec').value = rosterText();
 bind(); renderTable(); renderPad();
 if (!teacherPw) setTimeout(() => toast('⚙ 설정에서 선생님 비밀번호를 먼저 저장해 주세요.', 'warn'), 600);
 </script>
