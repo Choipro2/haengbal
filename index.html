@@ -172,6 +172,17 @@
       </div>
       <hr>
       <div class="space-y-2">
+        <h3 class="font-bold text-sm">명부 붙여넣기 (이름 자동 입력)</h3>
+        <p class="text-slate-500">엑셀·나이스 명렬표에서 <b>번호와 이름 두 열</b>을 복사해 붙여 넣으세요. 한 줄에 한 명씩, 예: <code>1 김하늘</code> · <code>41번 이바다</code><br>번호 없이 이름만 붙이면 현재 번호 순서대로 들어가요.</p>
+        <textarea id="namesInput" rows="6" placeholder="1	김하늘&#10;2	박나래&#10;…" class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 font-mono"></textarea>
+        <div class="flex items-center justify-between gap-2">
+          <label class="flex items-center gap-1 text-slate-600"><input type="checkbox" id="namesAddMissing" checked> 명부에만 있는 번호는 학생 추가</label>
+          <button id="namesApplyBtn" class="px-4 py-2 bg-indigo-600 text-white font-bold rounded-lg">이름 넣기</button>
+        </div>
+        <p class="text-slate-400">이름은 이 브라우저에만 저장되고 ChatGPT로 보내지 않아요.</p>
+      </div>
+      <hr>
+      <div class="space-y-2">
         <h3 class="font-bold text-sm">한 명 추가</h3>
         <div class="flex gap-2">
           <input id="addNum" type="number" placeholder="번호" class="w-24 bg-slate-50 border border-slate-300 rounded-lg px-3 py-2">
@@ -741,6 +752,50 @@ function bind() {
     if (!getStudent(state.activeNum)) state.activeNum = state.students[0].num;
     save(); renderTable(); renderPad(); closeModal('rosterModal'); toast(`${nums.length}명으로 설정했어요.`);
   };
+  $('namesApplyBtn').onclick = async () => {
+    const lines = $('namesInput').value.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    if (!lines.length) return toast('명부를 붙여 넣어 주세요.', 'warn');
+    const pairs = [], namesOnly = [];
+    for (const line of lines) {
+      const cells = line.split(/\t|\s{2,}|,/).map(c => c.trim()).filter(Boolean);
+      let m = line.match(/^(\d{1,2})\s*번?[\s\t.,)]*([^\d\t,]+?)\s*$/);
+      if (!m && cells.length >= 2) {           // 엑셀에서 여러 열(학년·반·번호·이름…)을 복사한 경우: 이름 바로 앞의 숫자 칸을 번호로
+        const ci = cells.findIndex(c => /^[가-힣A-Za-z][가-힣A-Za-z ]*$/.test(c));
+        const before = ci > 0 ? cells.slice(0, ci).filter(c => /^\d{1,2}\s*번?$/.test(c)) : [];
+        if (before.length) m = [null, parseInt(before.at(-1), 10), cells[ci]];
+      }
+      if (m) pairs.push({ num: +m[1], name: String(m[2]).trim() });
+      else if (/^[가-힣A-Za-z][가-힣A-Za-z ]{0,19}$/.test(line)) namesOnly.push(line);
+    }
+    if (pairs.length && namesOnly.length) return toast('번호 있는 줄과 이름만 있는 줄이 섞여 있어요. 한 가지로 맞춰 주세요.', 'warn');
+    if (!pairs.length && !namesOnly.length) return toast('번호와 이름을 읽지 못했어요. "1 김하늘" 형식인지 확인해 주세요.', 'warn');
+
+    let list = pairs;
+    if (namesOnly.length) {
+      if (namesOnly.length !== state.students.length &&
+          !(await confirmBox('이름 넣기', `이름 ${namesOnly.length}개, 학생 ${state.students.length}명이에요.\n앞 번호부터 차례대로 넣을까요?`))) return;
+      list = namesOnly.slice(0, state.students.length).map((name, i) => ({ num: state.students[i].num, name }));
+    }
+    const bad = list.filter(p => !(p.num >= 1 && p.num <= 99));
+    if (bad.length) return toast('번호는 1~99만 쓸 수 있어요.', 'warn');
+
+    let filled = 0, added = 0, skipped = [];
+    for (const { num, name } of list) {
+      let s = getStudent(num);
+      if (!s) {
+        if (!$('namesAddMissing').checked) { skipped.push(num); continue; }
+        s = newStudent(num); state.students.push(s); added++;
+      }
+      s.name = name; filled++;
+    }
+    state.students.sort((a, b) => a.num - b.num);
+    const missing = state.students.filter(s => !s.name).map(s => s.num + '번');
+    save(); renderTable(); renderPad(); closeModal('rosterModal');
+    $('namesInput').value = '';
+    toast(`${filled}명 이름 입력${added ? `, ${added}명 추가` : ''}${skipped.length ? `, ${skipped.length}명 건너뜀` : ''}` +
+          (missing.length ? ` · 이름 없는 번호: ${missing.join(', ')}` : ''), missing.length || skipped.length ? 'warn' : 'ok');
+  };
+
   $('addOneBtn').onclick = () => {
     const n = parseInt($('addNum').value, 10);
     if (!(n >= 1 && n <= 99)) return toast('1~99 사이 번호를 입력해 주세요.', 'warn');
